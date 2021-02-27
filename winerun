@@ -1,0 +1,878 @@
+#!/bin/sh
+Version=1.0
+maxfilesshow=25
+prgname="winerun"
+execd=`readlink -f "$0"`
+exel=${execd##*/}
+execd=${execd%/*}
+prgp="$0"
+xrandr=`which xrandr`
+
+unset p p1 p2 pall d1 d2 d3 dall cmd file prefix path exe px pxold wpath isexec ignorecd isversion islink exex options
+
+if [ "${0##*/}" != "$prgname" ]; then
+    if [ -z "$execd" ]; then
+	execd=${0%/*}
+    fi
+    if [ -d "$execd/drive_c" -o -d "$execd/dosdevices" ]; then
+	isprefix=1
+	exex=$exel
+    else
+	islink=1
+	p="${0##*/}"
+    fi
+fi
+
+if [ -z "$WINEDRIVES" ]; then
+    cdnow=`pwd`/
+    if [ "${cdnow%%/drive_c/*}" != "$cdnow" ]; then
+	WINEDRIVES="${cdnow%/*/drive_c/*}"
+    elif [ "${cdnow%%/dosdevices/*}" != "$cdnow" ]; then
+	WINEDRIVES="${cdnow%/*/dosdevices/*}"
+    elif [ -d "$cdnow/drive_c" -o -d "$cdnow/dosdevices" ]; then
+	WINEDRIVES="${cdnow%/*/}"
+    else
+	dlist=`ls -1`
+	for dname in $dlist; do
+	    if [ -d "$dname/drive_c" -o -d "$dname/dosdevices" ]; then
+		WINEDRIVES="$cdnow"
+		break
+	    fi
+	done
+    fi
+fi
+if [ -z "$WINEDRIVES" ]; then
+    if [ -d "$HOME/Games" ]; then
+	WINEDRIVES="$HOME/Games"
+    fi
+    if [ -d "$HOME/.PlayOnLinux/wineprefix" ]; then
+	WINEDRIVES="$HOME/.PlayOnLinux/wineprefix"
+    fi
+fi
+if [ -z "$WINEEDITOR" ]; then
+    WINEEDITOR=`which mcedit`
+fi
+if [ -z "$WINEEDITOR" ]; then
+    WINEEDITOR=`which edit`
+fi
+if [ -z "$WINEEDITOR" ]; then
+    WINEEDITOR=`vi`
+fi
+if [ -z "$WINERUNNERS" ]; then
+    if [ -d "$HOME/.local/share/lutris/runners/wine" ]; then
+	WINERUNNERS="$HOME/.local/share/lutris/runners/wine"
+    fi
+    if [ -d "$HOME/.PlayOnLinux/wine" ]; then
+	WINERUNNERS="$WINERUNNERS $HOME/.PlayOnLinux/wine"
+    fi
+fi
+
+
+
+help () {
+    echo "
+	$prgname -- wine cmdline tool
+	version $Version"'
+
+	* no need to set WINEPREFIX or "cd" into the right folder
+	* easy version management
+	* auto-restores screen-size if changed within wine 
+	* intuitive, small and fast
+
+	syntax:'"
+	    $prgname [dryrun|copy] [[version] <wineversion>|wine|lutris>] [prefix] <wineprefix>|<exe> [new] [cd] [[exec] <exe>|<shellscript>] [<args>]
+	    $prgname [dryrun] [[version] <wineversion>]|wine|lutris>] [prefix] <wineprefix>|<exe> [cd] [winecfg|regedit|msiexec|regsvr32|reg|cmd|winetricks|noteapad] [<args>]
+	    $prgname [dryrun] [prefix] <wineprefix>|<exe> [edit|firefox|gimp] <args>
+	    <exe name> [dryrun] [[version] <wineversion>|wine|lutris>] [[exec <exe>|<shellscript>]|winecfg|regedit|msiexec|regsvr32|reg|cmd|winetricks|noteapad|edit|firefox|gimp] [<args>]"'
+
+	with:
+	    - <wineprefix>: either a full path or defined in WINEDRIVES
+	    - <exe>: a full or partitional path with shell patterns (*?) with or without ".exe" extensions
+	    - <exe name>: renamed/liked winerun with the filename of any *.exe inside of a prefix  with or without ".exe" extensions
+	    - copy: copies the winrun script to <prefix>/<exe without path> to be started with that script by calling it directly or symolic linking it
+	    - <shellscript>: a full or partitional path with shell patterns with ".sh" extensions
+	    - <wineversion>: either a folder defined in WINERUNNERS or a number used as pattern in the same WINERUNNERS folders
+	    - cd: changes dir to the same folder the <exe> is found or to <prefix>/drive_c if no <exe> is given
+	    - new: creates new prefix (in the first WINEDRIVES folder if no absolute path is given)
+	    - dryrun: do not execute or create anything (apart from .sh scripts in <prefix>) but print-out the actions
+	    - also "wine" or "lutris" can be used for version: it removes any saved version and default to either system wine or the lutris version defined in .yml
+	    - when "exec" is not used then "cd" is assumed
+	    - all exept <prefix> ignore case distinction 
+	    - if only prefix is given then it will try to find the exe and path from a Lutris .yml configuration
+	    - in most places "find" is used to find the file if no absolute path is given
+	    - will not follow linked folders
+	    - if more then one alternative is found then the command will be interupted and the alternatives printed on screen
+
+	examples:'"
+	    $prgname GRunner
+	    $prgname 4.24 grunner -fullscreen y
+	    $prgname version 4.24 prefix WGame cd exec grunner.exe -fullscreen y -playnet 2
+	    $prgname wine ~/WPrefixes/WGame new exec /media/user1/CD1/Setup.exe
+	    $prgname Grun* notepad readme.txt
+	    $prgname version lutris-4.21-x86_64 WGame Bin/Release/GRunner
+	    $prgname GRunner.exe edit gfx.ini
+	    $prgname dryrun GRunner.exe regedit myconfig.reg
+	    $prgname lutris WGame exec lvlEdit 
+	    $prgname WGame gimp image/sell0.png
+	    $prgname copy 4.24 GRun* -fullscreen y
+	    ./WGame/GRunner -playnet 2
+	"'
+	env vars:       (auto-assigned)'"
+	    WINEDRIVES  ($WINEDRIVES)
+	    WINERUNNERS ($WINERUNNERS)
+	    WINE        ($WINE)
+	    WINEEDITOR  ($WINEEDITOR)"'
+
+	<prefix>/winerun.sh file:
+	    - will contain the last WINE=<version>
+	    - can also contain any user-defined script like "export WINEDEBUG=+loaddll"
+	    - will be removed when empty
+	    - can use relative path for wine binary with <prefix> as start (to use as bottle)
+
+	<prefix>/<exe name without .exe>.sh file:
+	    - shellscript will be sourced before running exe with the same name
+	    - autoupdates with options="<cmdline options>" when "copy" is used
+
+	vars to be used with the above .sh scripts:
+	    noscreen_restore=1 (disables the auto restore screensize feature)
+	    options="<args to exe>" (will by prefixed to cmdline args)
+
+	<prefix>/<exe name without .exe>.lua file:
+	    - will call lua with the script and the wine exe call as arguments
+	    - non zero exit status will stop winerun
+	    - will be ignored while dryrun 
+
+	linked/renamed winrerun:
+	    - linked/renamed winerun will run winerun with <filename> as <exe> 
+	    - renamed copy of winerun in a WINEPREFIX will be used as <exe> inside of the prefix (can be created with: "winrun copy" )
+	    - above copy can be symbolical linked (link name can be anything)
+
+
+    ' >&2
+}
+
+printx () {
+  if [ `echo "$1"| wc -l` -gt $maxfilesshow ]; then
+	echo "    multiple ${2:-files} found!!! #=`echo "$1"| wc -l`" >&2
+  else
+	echo "    multiple ${2:-files} found!!!:" >&2
+	echo "$1"
+  fi
+}
+
+run () {
+    if [ -n "$dryrun" ]; then
+	echo
+	echo "cd `pwd`"
+	echo "export WINEPREFIX=\"$WINEPREFIX\""
+	echo "exec $@"
+	echo 
+    else
+	exec $@
+    fi
+}
+
+optadd () {
+	if [ -f "$prefix/$1" ]; then
+	    if grep -q "^$2=" "$prefix/$1"; then
+		if [ -n "$3" ]; then
+		    sed "{s|^$2=.*$|$2=\"$3\"|}" "$prefix/$1" > "$prefix/$1.new"
+		    echo "    $1 updated:   $prefix/$1" >&2
+		    mv "$prefix/$1.new" "$prefix/$1"
+		else
+		    grep -v "^$2=" "$prefix/$1" > "$prefix/$1.new"
+		    grep -q -v "^[[:space:]]*$" "$prefix/$1.new" && {
+			mv "$prefix/$1.new" "$prefix/$1"
+			echo "    $1 updated:   $prefix/$1" >&2
+		    } || {
+			rm "$prefix/$1.new" "$prefix/$1"
+			echo "    $1 deleted:   $prefix/$1" >&2
+		    }
+		fi
+
+	    elif [ -n "$3" ]; then
+		echo "\n$2=\"$3\"" >> "$prefix/$1"
+		echo "    $1 updated:   $prefix/$1" >&2
+	    fi
+	elif [ -n "$3" ]; then
+	    echo "\n$2=\"$3\"" > "$prefix/$1"
+	    echo "    $1 created:   $prefix/$1" >&2
+	fi
+}
+
+if [ -z "$exex$islink" -a \( "$1" = "-h" -o "$1" = "--help" \) ]; then
+    help
+    exit
+fi 
+
+if [ "$1" = "dryrun" ]; then
+    dryrun=1
+    shift
+fi
+if [ "$1" = "copy" -a -z "$exex" ]; then
+    wrinstall=1
+    shift
+fi 
+
+
+if [ "$1" = "version" ]; then
+    unset WINE
+    isversion=1
+    shift
+fi 
+
+if [ "$1" = "wine" ]; then
+    winenew=`which wine`
+    WINE="$winenew"
+    export WINE
+    export wine="$WINE"
+    winedefault=1
+    shift
+elif [ "$1" = "lutris" ]; then
+    winenew="lutris"
+    winedefault=1
+    winelutris=1
+    shift
+elif [ -n "$2" ]; then
+    for i in $WINERUNNERS; do
+	winenew=`find -H $i -path "*/$1/bin/wine" -print`
+#	if [ -z "$WINE" -a "${1%/*}" = "$1" -a "${1%\**}" = "$1" ]; then
+	if [ -z "$winenew" -a -z "${1%%[0-9.]*}" ]; then
+	    winenew=`find -H $i -path "*/*[a-zA-Z/_-( ]$1[/_-) ]*bin/wine" -print`
+	fi
+	if [ `echo "$winenew"| wc -l` -gt 1 ]; then
+	    allw=$allw$winenew
+	    unset WINE
+	    continue
+	elif [ -z "$allw" -a -n "$winenew" ]; then
+	    break
+	fi
+    done
+    if [ -n "$allw" ]; then
+	printx "$allw" "wine versions"
+	exit
+    elif [ -n "$winenew" ]; then
+	WINE="$winenew"
+	export WINE
+	export wine="$WINE"
+	shift
+    elif [ -n "$isversion" ]; then
+	echo "    Wine version not found: $1" >&2
+	exit
+    fi
+fi
+
+WINE=${WINE:-wine}
+if [ "$1" = "exec" ]; then
+    isexec="i"
+    ignorecd=1
+    shift
+elif [ "$1 $2" = "cd exec" ]; then
+    isexec="i"
+    shift
+    shift
+elif [ -z "$exex" -a "$1" = "prefix" ]; then
+    isprefix=1
+    shift
+fi
+if [ -n "$p" ]; then
+    isexec=1
+elif [ -z "$exex" ]; then
+    p="$1"
+else
+    p="$exex"
+fi
+
+[ -z "$p" ] && { help; exit; }
+
+if [ "${p%%.exe}" = "$p" ]; then
+    noextexe=1
+    p="$p.exe"
+fi
+
+
+if [ -z "$exex" -a ! -f "$p" ]; then
+  unset p2
+  if [ -z "$isprefix" ]; then
+    apwd=`pwd`
+    for i in $WINEDRIVES; do
+	pff=`find -H $i -path "*/drive_c/*" -print| grep "${apwd%/drive_c/*}/drive_c/"`
+	if [ -n "$pff" ]; then
+	    p2=`find -H "$apwd" -path "*/$p" -print`
+	    if [ -z "$p2" -a \( -n "$isexec" -o "$1" = "$p" \) ]; then
+		p2=`echo "$p"| grep -q "[A-Z]" || find -H "$apwd" -ipath "*/$p" -print`
+	    elif [ -z "$p2" ]; then
+		px=`echo "$p"| grep -q "[A-Z]" || find -H "$apwd" -ipath "*/$p" -print`
+	    fi
+	    if [ -n "$px" -a `echo "$px"| wc -l` -gt 1 ]; then
+		pxall="$px"
+		unset px
+	    elif [ `echo "$p2"| wc -l` -gt 1 ]; then
+		pall="$p2"
+		unset p2
+	    fi
+	    if [ -z "$p2" -a -z "$px" ]; then
+		p2=`find -H "${apwd%/drive_c/*}/drive_c/" -path "*/$p" -print`
+		if [ -z "$p2" -a \( -n "$isexec" -o "$1" = "$p" \) ]; then
+		    p2=`echo "$p"| grep -q "[A-Z]" || find -H "${apwd%/drive_c/*}/drive_c/" -ipath "*/$p" -print`
+		elif [ -z "$p2" ]; then
+		    px=`echo "$p"| grep -q "[A-Z]" || find -H "${apwd%/drive_c/*}/drive_c/" -ipath "*/$p" -print`
+		fi
+		if [ -n "$px" -a `echo "$px"| wc -l` -gt 1 ]; then
+		    pxall="$px"
+		    unset px
+		elif [ `echo "$p2"| wc -l` -gt 1 ]; then
+		    pall="$p2"
+		    unset p2
+		fi
+	    fi
+	    break
+	fi
+    done
+    if [ -z "$p2" -a -z "$px" -a -z "$pall" -a -z "$pxall" ]; then
+      for i in $WINEDRIVES; do
+	p1=`find -H $i -path "*/$p" -print`
+	if [ -z "$p1" -a \( -n "$isexec" -o "$1" = "$p" \) ]; then
+	    p1=`echo "$p"| grep -q "[A-Z]" || find -H $i -ipath "*/$p" -print`
+	elif [ -z "$p1" ]; then
+	    px1=`echo "$p"| grep -q "[A-Z]" || find -H $i -ipath "*/$p" -print`
+	fi
+	if [ -n "$px1" -a `echo "$px1"| wc -l` -gt 1 ]; then
+	    pxall="$pxall\n$px\n$px1\n"
+	    unset px
+	    unset px1
+	elif [ `echo "$p1"| wc -l` -gt 1 ]; then
+	    pall="$pall\n$p2\n$p1\n"
+	    unset p1
+	    unset p2
+	    continue
+	fi
+	if [ -n "$p2" -a ! -z "$p1" ]; then
+	    pall="$pall\n$p2\n$p1\n"
+	    unset p1
+	    unset p2
+	    continue
+	fi
+	if [ -n "$px" -a ! -z "$px1" ]; then
+	    pall="$pall\n$p2\n$p1\n"
+	    unset px1
+	    unset px
+	    continue
+	fi
+	if [ ! -z "$p1" ]; then
+    	    p2=$p1
+	elif [ ! -z "$px1" ]; then
+    	    px=$px1
+      
+	fi
+      done
+    fi
+  fi
+
+  if [ "$1" != "$p" -a -d "$1/drive_c" ]; then
+    cd "$1/drive_c" || exit
+    d2=`pwd`
+    cd - >/dev/null
+  elif [ "$1" != "$p" -a -z "$isexec" -a \( "${1##*/}" = "$1" -o "$2$3" = "new" -o "$2" = "exec" -o "$2 $3" = "cd exec" -o "$2 $3" = "new exec" -o "$2 $3 $4" = "new cd exec"  \) ]; then
+    for i in $WINEDRIVES; do
+      d1=`find -H $i -path "*/$1/drive_c" -print`
+      if [ -z "$d1" ]; then
+	d1=`find -L $i -maxdepth 2 -path "*/$1/drive_c" -print`
+      fi
+      if [ `echo "$d1"| wc -l` -gt 1 ]; then
+	dall="$dall$d2$d1\n"
+	unset d2
+	continue
+      fi
+      if [ -n "$d2" -a ! -z "$d1" ]; then
+	dall="$dall$d2$d1\n"
+	unset d2
+	continue
+      fi
+      if [ ! -z "$d1" ]; then
+        d2=$d1
+      fi
+    done
+    if [ -n "$dall" -a -z "$p2" ]; then
+      printx "$dall" "folders"
+      exit
+    fi
+    if [ -z "$p2" -a -z "$d2" -a \( "$2$3" = "new" -o "$2 $3" = "new exec" -o "$2 $3 $4" = "new cd exec" \) -a "${1##*/}" != "$1" ]; then
+      mkdir -p "$1/drive_c"
+      cd "$1/drive_c" || exit
+      d2=`pwd`
+      cd - >/dev/null
+    elif [ -z "$p2" -a -z "$d2" -a \( "$2$3" = "new" -o "$2 $3" = "new exec" -o "$2 $3 $4" = "new cd exec" \)  ]; then
+      for i in $WINEDRIVES; do
+        if [ "${1##*/}" = "$1" ]; then
+          d3="`find -H $i -path "*/drive_c/*" -print| head -1`"
+          if [ -z "$d3" ]; then
+	    break
+          fi
+	  d3="${d3%%/drive_c/*}"
+	  d3="${d3%/*}"
+	  mkdir -p "$d3/$1/drive_c"
+	  cd "$d3/$1/drive_c" || exit
+          d2=`pwd`
+          cd - >/dev/null
+          break
+        fi
+      done
+      if [ -z "$p2" -a -z "$d2" -a -z "$px" -a -z "$pxall" -a -z "$pall" ]; then
+        echo "prefix or executable not found: $1" >&2
+        exit
+      fi
+    elif [ -z "$p2" -a -z "$d2" -a -z "$px" -a -z "$pxall" -a -z "$pall" ]; then
+      echo "version, prefix or executable not found: $1" >&2
+      exit
+    fi
+  elif [ -z "$p2" -a -z "$px" -a -z "$pxall" -a -z "$pall" ]; then
+    echo "executable not found: $p" >&2
+    exit
+  fi
+  if [ -z "$p2" -a -z "$d2" -a -n "$px" ]; then
+    p2="$px"
+  fi
+  p=$p2
+fi
+if [ -n "$exex" ]; then
+  prefix="$execd"
+#  exe="$p"
+elif [ "$1" != "$p" -a -n "$d2" -a -d "$d2" -a \( -z "$p2" -o "$2" = "exec" -o "$2 $3" = "cd exec" -o "$2$3" = "new" -o "$2 $3" = "new exec" -o "$2 $3 $4" = "new cd exec" -o "$2" = "winetricks" -o "$2" = "winecfg" -o "$2" = "regedit" \) ];then
+  prefix=${d2%%/drive_c}
+else
+  if [ -n "$pall" ]; then
+	printx "$pall" "executables"
+	exit
+  elif [ -n "$pxall" ]; then
+	printx "$pxall" "executables"
+	exit
+  fi
+  if [ "${p%/*}" = "$p" ]; then
+    path="."
+  else
+    path=${p%/*}
+  fi
+  exe=${p##*/}
+
+  oldpx=`pwd`
+  if [ -n "$path" -a "$path" != "$exe" ]; then
+    cd "$path" || exit
+  fi
+  px=`pwd`
+  prefix=${px%%/drive_c/*}
+  if [ $ignorecd ]; then
+    exepath="$path/"
+    cd - >/dev/null
+  fi
+#  path="$path/"
+fi
+
+#echo $path
+
+if [ "$prefix" != "$p" -a -d "$prefix" ]; then
+    if readlink "$prefix"; then
+	prefix=`readlink "$prefix"`
+    fi 
+    if [ -d $HOME/.config/lutris/games ]; then
+	yml=`grep "prefix: $prefix$" $HOME/.config/lutris/games/*.yml | grep -o ".*.yml"`
+	if [ `echo "$yml"| wc -l` -gt 1 ]; then
+	    echo "    multiple lutris .yml configurations found!!!\n$yml" >&2
+	    unset yml
+	fi
+    fi
+    if [ -f "$prefix/winerun.sh" ]; then
+	wineold="$WINE"
+	unset WINE
+	. "$prefix/winerun.sh"
+	if [ -n "$options" ]; then
+	    options="$options "
+	elif [ -n "$exex" ]; then
+	    saveoptions=1
+	fi
+	if [ -n "$WINE" -a "${WINE#/}" = "$WINE" -a -f "$prefix/$WINE" ]; then
+	    WINE="$prefix/$WINE" 
+	fi
+	if [ -n "$WINE" -a ! -f "$WINE" ]; then
+	    WINE=`echo $WINE | sed "{ s|.*/\.|$HOME/.| }"` 
+	fi
+	winesaved="$WINE"
+	if [ -n "$winenew" ]; then
+	    WINE="$winenew"
+	elif [ -z "$WINE" ]; then
+	    WINE="$wineold"
+	fi
+	export WINE
+	export wine="$WINE"
+    fi
+    if [ -n "$winenew" -a \( -z "$wineold" -o "$winesaved" != "$winenew" \) ]; then
+	if [ -z "$dryrun" ]; then
+	    warg="$WINE"
+	    if [ -n "$winedefault" ]; then
+		unset warg
+	    fi
+	    optadd "winerun.sh" "WINE" "$warg"
+	fi
+    fi
+    if [ -n "$yml" -a \( \( -z "$winenew"  -a -z "$winesaved" \) -o -n "$winelutris" \) ]; then
+	yml_ver=`grep "version: " $yml | awk '{ print $2 }'`
+	if [ -f $HOME/.local/share/lutris/runners/wine/$yml_ver/bin/wine ]; then
+	    export WINE=$HOME/.local/share/lutris/runners/wine/$yml_ver/bin/wine
+	    export wine="$WINE"
+	    yml_arch=`grep "arch: " $yml | awk '{ print $2 }'`
+	    if [ -n "$yml_arch" ]; then
+		export WINEARCH=$yml_arch
+	    fi
+	fi
+    fi
+    if [ "${WINE%/*}" != "$WINE" ]; then
+	wpath="${WINE%/*}/"
+    fi
+
+    if [ -n "$yml" ]; then
+	echo "    Lutris:     $yml" >&2
+    fi
+    echo "    Wine ver:   ${WINE:-wine}" >&2
+    echo "    Prefix:     $prefix" >&2
+    echo "    Dir:        `pwd`" >&2
+    
+    if [ -z "$exex$islink" ]; then
+	shift
+    fi
+    export WINEPREFIX="$prefix"
+    if [ "$1 $2" = "cd exec" -o "$1 $2" = "cd cmd" -o "$1 $2" = "cd regedit" ]; then
+	shift
+	cmdcd=1
+    elif [ "$1 $2 $3" = "new cd exec" ]; then
+	shift
+	shift
+	cmdcd=1
+    elif [ "$1 $2" = "new exec" ]; then
+	shift
+    fi
+    if [ "$1" = "exec" -a \( "$2" = "winecfg" -o "$2" = "regedit" -o "$2" = "msiexec" -o "$2" = "regsrv32" -o "$2" = "notepad" -o "$2" = "cmd"  \) ] ;then
+	shift
+    fi
+    if [ "$1" = "winecfg" ]; then
+	shift
+	run ${wpath}winecfg $@
+    elif [ "$1" = "regedit" ]; then
+	if [ -n "$cmdcd" -a -n "$path" ]; then
+	    cd "$path" || exit
+	    echo "    New Dir:    `pwd`" >&2
+	elif [ -n "$cmdcd" ]; then
+	    cd "$prefix/drive_c" || exit
+	    echo "    New Dir:    `pwd`" >&2
+	fi
+	shift
+	if [ -n "$1" -a -z "$2" -a ! -f "$1" ]; then
+	    apwd=`pwd`
+	    if [ "${apwd%/drive_c/*}" = "$prefix" ]; then
+    		file=`find -H -ipath "*/${1#/}" -print`
+	    fi
+	    if [ -z "$file" ]; then
+    		file=`find -H $prefix -ipath "*/${1#/}" -print`
+	    fi
+	    if [ `echo "$file"| wc -l` -gt 1 ]; then
+		file=`echo "$file"| grep -v -e /~ -e  .bak/` 
+	    fi
+	    if [ `echo "$file"| wc -l` -gt 1 ]; then
+		printx "$file"
+		exit
+	    fi
+	    if [ -z "$file" ]; then
+		file="$@"
+	    fi
+	    run ${wpath}regedit "$file"
+	else
+	    run ${wpath}regedit $@
+	fi
+    elif [ "$1" = "msiexec" ]; then
+	shift
+	run ${wpath}msiexec $@
+    elif [ "$1" = "regsvr32" ]; then
+	shift
+	run ${wpath}regsvr32 $@
+    elif [ "$1" = "winetricks" -a \( -n "$winenew" -o -n "$winesaved" \) -a -f $HOME/.local/share/lutris/runtime/winetricks ]; then
+	shift
+	run $HOME/.local/share/lutris/runtime/winetricks $@
+    elif [ "$1" = "winetricks" ]; then
+	shift
+	run winetricks $@
+    elif [ "$1" = "notepad" ]; then
+	shift
+	if [ -n "$1" -a -z "$2" -a ! -f "$1" ]; then
+	    apwd=`pwd`
+	    if [ "${apwd%/drive_c/*}" = "$prefix" ]; then
+    		file=`find -H -ipath "*/${1#/}" -print`
+	    fi
+	    if [ -z "$file" ]; then
+    		file=`find -H $prefix -ipath "*/${1#/}" -print`
+	    fi
+	    if [ `echo "$file"| wc -l` -gt 1 ]; then
+		file=`echo "$file"| grep -v -e /~ -e  .bak/` 
+	    fi
+	    if [ `echo "$file"| wc -l` -gt 1 ]; then
+		printx "$file"
+		exit
+	    fi
+	    if [ -z "$file" ]; then
+		file="$@"
+	    fi
+	    run ${wpath}notepad "$file"
+	else
+	    run ${wpath}notepad $@
+	fi
+    elif [ "$1" = "edit" ]; then
+	shift
+	if [ -n "$1" -a -z "$2" -a ! -f "$1" ]; then
+	    apwd=`pwd`
+	    if [ "${apwd%/drive_c/*}" = "$prefix" ]; then
+    		file=`find -H -ipath "*/${1#/}" -print`
+	    fi
+	    if [ -z "$file" ]; then
+    		file=`find -H $prefix -ipath "*/${1#/}" -print`
+	    fi
+	    if [ `echo "$file"| wc -l` -gt 1 ]; then
+		file=`echo "$file"| grep -v -e /~ -e  .bak/` 
+	    fi
+	    if [ `echo "$file"| wc -l` -gt 1 ]; then
+		printx "$file"
+		exit
+	    fi
+	    if [ -z "$file" ]; then
+		file="$@"
+	    fi
+	    run $WINEEDITOR "$file"
+	else
+	    run $WINEEDITOR $@
+	fi
+    elif [ "$1" = "gimp" ]; then
+	shift
+	if [ -n "$1" -a -z "$2" -a ! -f "$1" ]; then
+	    apwd=`pwd`
+	    if [ "${apwd%/drive_c/*}" = "$prefix" ]; then
+    		file=`find -H -ipath "*/${1#/}" -print`
+	    fi
+	    if [ -z "$file" ]; then
+    		file=`find -H $prefix -ipath "*/${1#/}" -print`
+	    fi
+	    if [ `echo "$file"| wc -l` -gt 1 ]; then
+		file=`echo "$file"| grep -v -e /~ -e  .bak/` 
+	    fi
+	    if [ `echo "$file"| wc -l` -gt 1 ]; then
+		printx "$file"
+		exit
+	    fi
+	    if [ -z "$file" ]; then
+		file="$@"
+	    fi
+	    run gimp "$file"
+	else
+	    run gimp $@
+	fi
+    elif [ "$1" = "firefox" ]; then
+	shift
+	if [ -n "$1" -a -z "$2" -a ! -f "$1" ]; then
+	    apwd=`pwd`
+	    if [ "${apwd%/drive_c/*}" = "$prefix" ]; then
+    		file=`find -H -ipath "*/${1#/}" -print`
+	    fi
+	    if [ -z "$file" ]; then
+    		file=`find -H $prefix -ipath "*/${1#/}" -print`
+	    fi
+	    if [ `echo "$file"| wc -l` -gt 1 ]; then
+		file=`echo "$file"| grep -v -e /~ -e  .bak/` 
+	    fi
+	    if [ `echo "$file"| wc -l` -gt 1 ]; then
+		printx "$file"
+		exit
+	    fi
+	    if [ -z "$file" ]; then
+		file="$@"
+	    fi
+	    run firefox "$file"
+	else
+	    run firefox $@
+	fi
+    elif [ "$1$2" = "new" ]; then
+	run ${WINE}boot
+    elif [ "$1" = "reg" ]; then
+	run $WINE $@
+    elif [ "$1" = "cmd" ]; then
+	shift
+	if [ -n "$cmdcd" -a -n "$path" ]; then
+	    cd "$path" || exit
+	    echo "    New Dir:    `pwd`" >&2
+	elif [ -n "$cmdcd" ]; then
+	    cd "$prefix/drive_c" || exit
+	    echo "    New Dir:    `pwd`" >&2
+	fi
+	if [ -n "$1" -a -z "$2" ]; then
+	    apwd=`pwd`
+	    if [ -f "$1" ]; then
+		file="$1"
+	    elif [ "${apwd%/drive_c/*}" = "$prefix" ]; then
+    		file=`find -H -ipath "*/${1#/}" -print`
+	    fi
+	    if [ -z "$file" ]; then
+    		file=`find -H $prefix -ipath "*/${1#/}" -print`
+	    fi
+	    if [ `echo "$file"| wc -l` -gt 1 ]; then
+		file=`echo "$file"| grep -v -e /~ -e  .bak/` 
+	    fi
+	    if [ `echo "$file"| wc -l` -gt 1 ]; then
+		printx "$file" "batch files"
+		exit
+	    fi
+	    if [ -z "$file" ]; then
+		file="$@"
+	    fi
+	    if [ -n "$dryrun" ]; then
+		run $WINE cmd.exe /c "c:/${file#*/drive_c/}"
+	    else
+		$WINE cmd.exe /c "c:/${file#*/drive_c/}"
+	    fi
+	else
+	    if [ -n "$dryrun" ]; then
+		run $WINE cmd.exe $@
+	    else
+		$WINE cmd.exe $@
+	    fi
+	fi
+    elif [ "$1" = "exec" -a -n "$2" -a "${2%[\*/]*}" = "$2" -a -n "`which $2`" ]; then
+	cmd="$2"
+	shift
+	shift
+	if [ -n "$cmdcd" -a -n "$path" ]; then
+	    cd "$path" || exit
+	    echo "    New Dir:    `pwd`" >&2
+	elif [ -n "$cmdcd" ]; then
+	    cd "$prefix/drive_c" || exit
+	    echo "    New Dir:    `pwd`" >&2
+	fi
+	echo "    Command:    $cmd" >&2
+	run "$cmd" $@
+    elif [ \( "$1" = "exec" -a -n "$2" \) -o \( -n "$1" -a -n "$d2" -a -z "$p2" -a -z "$exe" \) -o \( -n "$exex" \) ]; then
+	if [ "$1" = "exec" ]; then
+	    shift
+	else
+	    cmdcd=1
+	fi
+	if [ -n "$exex" ]; then
+	    cmd="$exex"
+	else
+	    cmd="$1"
+	    shift
+	fi
+	if [ "${cmd%%.exe}" = "$cmd" -a "${cmd%%.sh}" = "$cmd" ]; then
+	    cmd=$cmd".exe"
+	fi
+	if [ -d "$oldpx" -a -f "$oldpx/$cmd" -a ! -f "$cmd" ]; then
+            cmd2="$oldpx/$cmd"
+	elif [ ! -f "$cmd" ]; then
+	    apwd=`pwd`
+	    if [ "${apwd%/drive_c/*}" = "$prefix" ]; then
+    		cmd2=`find -H "$apwd" -ipath "*/${cmd#/}" -print`
+		if [ -z "$cmd2" ]; then
+    		    cmd2=`echo "$cmd"| grep -q "[A-Z]" || find -H "$apwd" -ipath "*/${cmd#/}" -print`
+		fi
+	    fi
+	    if [ -z "$cmd2" ]; then
+    		cmd2=`find -H $prefix -path "*/${cmd#/}" -print`
+		if [ -z "$cmd2" ]; then
+    		    cmd2=`echo "$cmd"| grep -q "[A-Z]" || find -H $prefix -ipath "*/${cmd#/}" -print`
+		fi
+	    fi
+	    if [ -z "$cmd2" ]; then
+		echo "executable $cmd not found" >&2
+		exit
+	    fi
+	    if [ `echo "$cmd2"| wc -l` -gt 1 ]; then
+		cmd2=`echo "$cmd2"| grep -v -e /windows/system32/ -e  /windows/syswow64/` 
+	    fi
+	    if [ `echo "$cmd2"| wc -l` -gt 1 ]; then
+		printx "$cmd2" "executables"
+		exit
+	    fi
+	else
+	    cmd2="$cmd"
+	fi
+	if [ "${cmd2%%.sh}" = "$cmd2" ]; then
+	    runexe="$cmd2"
+	    if [ -n "$cmdcd" -a "${cmd2%/*}" != "$cmd" ]; then
+		cd "${cmd2%/*}"
+		echo "    New Dir:    `pwd`" >&2
+	    fi
+	else
+	    if [ -n "$cmdcd" -a "${cmd2%/*}" != "$cmd" ]; then
+		cd "${cmd2%/*}"
+		echo "    New Dir:    `pwd`" >&2
+	    fi
+	    if [ "${cmd2##*/}" = $cmd2 ]; then
+		cmd2="./$cmd2"
+	    fi
+	    echo "    Script:     $cmd2" >&2
+	    run "$cmd2" $@
+	fi
+    elif [ -n "$d2" -a -z "$exe" ]; then
+	if [ -n "$yml" ]; then
+	    yml_exe=`grep "exe: " $yml | { read a b; echo "$b"; }`
+	    if [ -n "$yml_exe" ]; then
+		yml_path=`grep "working_dir: " $yml | { read a b; echo "$b"; }`
+		cd "$yml_path"
+		echo "    New dir:    `pwd`" >&2
+		yml_args=`grep "args: " $yml | { read a b; echo "$b"; }`
+	    fi
+	fi
+	if [ -n "$yml_exe" -a -f "$yml_exe" ]; then
+	    runexe="$yml_exe"
+	    options="$yml_args"
+	else
+	    echo "no executable found" >&2
+	fi
+    else
+	runexe="$exepath$exe"
+    fi
+    if [ -n "$runexe" ]; then
+	pex="${runexe%.exe}"
+	pex="$prefix/${pex##*/}"
+	if [ -n "$wrinstall" ]; then
+	    cp "$prgp" "$pex"
+	    echo "    Installed copy of $prgp to $pex"
+	    optadd "${pex##*/}.sh" "options" "$@"
+	    if [ -n "$@" ]; then
+		unset options
+	    fi
+	elif [ -f "$pex.sh" ]; then
+	    . "$pex.sh"
+	fi
+	if [ -z "$dryrun$wrinstall" -a -f "$pex.lua" ]; then
+	    lua=`which lua`
+	    if [ -n "$lua" ]; then 
+		$lua "$pex.lua" $WINE $runexe $options$@ || exit
+	    fi
+	fi
+	if [ -n "$options" ]; then
+	    options="$options "
+	fi
+
+	echo "    Executable: $runexe $options$@" >&2
+	if [ -n "$dryrun" -o -n "$wrinstall" ]; then
+	    dryrun=1
+	    run $WINE "$runexe" $options$@
+	else
+	    if [ -n "$xrandr" -a -z "$noscreen_restore" ]; then
+		res=`$xrandr --prop|grep "Screen 0:"| awk '{print $8"x"$10}'`
+		$WINE "$runexe" $options$@
+		res2=`$xrandr --prop|grep "Screen 0:"| awk '{print $8"x"$10}'`
+		if [ "$res" != "$res2" ]; then
+		    $xrandr -s ${res%,}
+		    echo "Restoring original resolution ${res%,} from ${res2%,}"
+		fi	
+	    else
+		$WINE "$runexe" $options$@
+	    fi
+	fi
+    fi
+fi
