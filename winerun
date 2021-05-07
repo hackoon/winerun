@@ -1,11 +1,11 @@
 #!/bin/sh
-Version=1.0
+Version=1.1
 maxfilesshow=25
 prgname="winerun"
 execd=`readlink -f "$0"`
 exel=${execd##*/}
-execd=${execd%/*}
 prgp="$0"
+execd=${execd%/*}
 xrandr=`which xrandr`
 
 unset p p1 p2 pall d1 d2 d3 dall cmd file prefix path exe px pxold wpath isexec ignorecd isversion islink exex options
@@ -69,7 +69,7 @@ fi
 
 
 
-help () {
+help() {
     echo "
 	$prgname -- wine cmdline tool
 	version $Version"'
@@ -82,7 +82,7 @@ help () {
 	syntax:'"
 	    $prgname [dryrun|copy] [[version] <wineversion>|wine|lutris>] [prefix] <wineprefix>|<exe> [new] [cd] [[exec] <exe>|<shellscript>] [<args>]
 	    $prgname [dryrun] [[version] <wineversion>]|wine|lutris>] [prefix] <wineprefix>|<exe> [cd] [winecfg|regedit|msiexec|regsvr32|reg|cmd|winetricks|noteapad] [<args>]
-	    $prgname [dryrun] [prefix] <wineprefix>|<exe> [edit|firefox|gimp] <args>
+	    $prgname [dryrun] [prefix] <wineprefix>|<exe> [edit|firefox|gimp|kill|suspend|resume] <args>
 	    <exe name> [dryrun] [[version] <wineversion>|wine|lutris>] [[exec <exe>|<shellscript>]|winecfg|regedit|msiexec|regsvr32|reg|cmd|winetricks|noteapad|edit|firefox|gimp] [<args>]"'
 
 	with:
@@ -90,6 +90,9 @@ help () {
 	    - <exe>: a full or partitional path with shell patterns (*?) with or without ".exe" extensions
 	    - <exe name>: renamed/liked winerun with the filename of any *.exe inside of a prefix  with or without ".exe" extensions
 	    - copy: copies the winrun script to <prefix>/<exe without path> to be started with that script by calling it directly or symolic linking it
+	    - copy additonal creates <prefix>/<exe without path>.desktop file 
+	    - if both wrestool (icoutils) and convert (ImageMagic) are installed copy creates an <exe>.png iconfile from the windows icon
+	    - can be killed, resumed or suspended - kill can have a different signal than default 9 as argument
 	    - <shellscript>: a full or partitional path with shell patterns with ".sh" extensions
 	    - <wineversion>: either a folder defined in WINERUNNERS or a number used as pattern in the same WINERUNNERS folders
 	    - cd: changes dir to the same folder the <exe> is found or to <prefix>/drive_c if no <exe> is given
@@ -105,6 +108,7 @@ help () {
 
 	examples:'"
 	    $prgname GRunner
+	    $prgname GRunner kill
 	    $prgname 4.24 grunner -fullscreen y
 	    $prgname version 4.24 prefix WGame cd exec grunner.exe -fullscreen y -playnet 2
 	    $prgname wine ~/WPrefixes/WGame new exec /media/user1/CD1/Setup.exe
@@ -151,7 +155,7 @@ help () {
     ' >&2
 }
 
-printx () {
+printx() {
   if [ `echo "$1"| wc -l` -gt $maxfilesshow ]; then
 	echo "    multiple ${2:-files} found!!! #=`echo "$1"| wc -l`" >&2
   else
@@ -160,7 +164,7 @@ printx () {
   fi
 }
 
-run () {
+run() {
     if [ -n "$dryrun" ]; then
 	echo
 	echo "cd `pwd`"
@@ -172,7 +176,7 @@ run () {
     fi
 }
 
-optadd () {
+optadd() {
 	if [ -f "$prefix/$1" ]; then
 	    if grep -q "^$2=" "$prefix/$1"; then
 		if [ -n "$3" ]; then
@@ -200,6 +204,37 @@ optadd () {
 	fi
 }
 
+restore() {
+	echo "terminated $runexe $options$@..."
+	res2=`$xrandr --prop|grep "Screen 0:"| awk '{print $8"x"$10}'`
+	if [ "$res" != "$res2" ]; then
+	    $xrandr -s ${res%,}
+	    echo "Restoring original resolution ${res%,} from ${res2%,}"
+	fi	
+}
+
+ico() {
+    unset icode
+    p1="${1%.exe}"
+    p2="$2/${p1##*/}"
+    if [ -n "$convert" -a -n "$wrestool" ]; then
+	$wrestool -x -t 14 "$1" >"$p2.ico"
+	$convert "$p2.ico" -thumbnail 64x64 -alpha on -background none -flatten "$p2.png"
+	rm "$p2.ico"
+	icode="Icon=$p2.png"
+    fi
+    echo "
+[Desktop Entry]
+Name=${p1##*/}
+Exec=$p2
+Type=Application
+StartupNotify=true
+StartupWMClass=${p1##*/}.exe
+$icode
+" >"$p2.desktop"
+    chmod a+x "$p2.desktop"
+}
+
 if [ -z "$exex$islink" -a \( "$1" = "-h" -o "$1" = "--help" \) ]; then
     help
     exit
@@ -211,6 +246,8 @@ if [ "$1" = "dryrun" ]; then
 fi
 if [ "$1" = "copy" -a -z "$exex" ]; then
     wrinstall=1
+    wrestool=`which wrestool` 
+    convert=`which convert`
     shift
 fi 
 
@@ -540,7 +577,22 @@ if [ "$prefix" != "$p" -a -d "$prefix" ]; then
 	shift
     fi
     export WINEPREFIX="$prefix"
-    if [ "$1 $2" = "cd exec" -o "$1 $2" = "cd cmd" -o "$1 $2" = "cd regedit" ]; then
+    var1=$1
+    if [ "$1" = "kill" ]; then
+	if [ -n "$2" ]; then
+	    signal=$2
+	    shift
+	else
+	    signal=9
+	fi
+	shift
+    elif [ "$1" = "suspend" ]; then
+	shift
+	signal=19
+    elif [ "$1" = "resume" ]; then
+	shift
+	signal=18
+    elif [ "$1 $2" = "cd exec" -o "$1 $2" = "cd cmd" -o "$1 $2" = "cd regedit" ]; then
 	shift
 	cmdcd=1
     elif [ "$1 $2 $3" = "new cd exec" ]; then
@@ -834,7 +886,10 @@ if [ "$prefix" != "$p" -a -d "$prefix" ]; then
     else
 	runexe="$exepath$exe"
     fi
-    if [ -n "$runexe" ]; then
+
+    if [ -n "$runexe" -a "$signal" ]; then
+	killall -$signal "${runexe##*/}" && echo "    ${runexe##*/} ${var1%e}ed"
+    elif [ -n "$runexe" ]; then
 	pex="${runexe%.exe}"
 	pex="$prefix/${pex##*/}"
 	if [ -n "$wrinstall" ]; then
@@ -843,6 +898,9 @@ if [ "$prefix" != "$p" -a -d "$prefix" ]; then
 	    optadd "${pex##*/}.sh" "options" "$@"
 	    if [ -n "$@" ]; then
 		unset options
+	    fi
+	    if [ -n "$DISPLAY" ]; then
+		ico $runexe $prefix
 	    fi
 	elif [ -f "$pex.sh" ]; then
 	    . "$pex.sh"
@@ -864,12 +922,14 @@ if [ "$prefix" != "$p" -a -d "$prefix" ]; then
 	else
 	    if [ -n "$xrandr" -a -z "$noscreen_restore" ]; then
 		res=`$xrandr --prop|grep "Screen 0:"| awk '{print $8"x"$10}'`
+		trap 'restore' SIGTERM 2>/dev/null
+		trap 'restore' SIGKILL 2>/dev/null
+		trap 'restore' SIGQUIT 2>/dev/null
+		trap 'restore' SIGINT 2>/dev/null
+		trap 'restore' SIGSTOP 2>/dev/null
+		trap 'restore' SIGSEGV 2>/dev/null
 		$WINE "$runexe" $options$@
-		res2=`$xrandr --prop|grep "Screen 0:"| awk '{print $8"x"$10}'`
-		if [ "$res" != "$res2" ]; then
-		    $xrandr -s ${res%,}
-		    echo "Restoring original resolution ${res%,} from ${res2%,}"
-		fi	
+		restore
 	    else
 		$WINE "$runexe" $options$@
 	    fi
