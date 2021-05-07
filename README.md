@@ -1,8 +1,7 @@
 # winerun
 
-
     winerun -- wine cmdline tool
-    version 1.0
+    version 1.1
 
     * no need to set WINEPREFIX or "cd" into the right folder
     * easy version management
@@ -12,7 +11,7 @@
     syntax:
         winerun [dryrun|copy] [[version] <wineversion>|wine|lutris>] [prefix] <wineprefix>|<exe> [new] [cd] [[exec] <exe>|<shellscript>] [<args>]
         winerun [dryrun] [[version] <wineversion>]|wine|lutris>] [prefix] <wineprefix>|<exe> [cd] [winecfg|regedit|msiexec|regsvr32|reg|cmd|winetricks|noteapad] [<args>]
-        winerun [dryrun] [prefix] <wineprefix>|<exe> [edit|firefox|gimp] <args>
+        winerun [dryrun] [prefix] <wineprefix>|<exe> [edit|firefox|gimp|kill|suspend|resume] <args>
         <exe name> [dryrun] [[version] <wineversion>|wine|lutris>] [[exec <exe>|<shellscript>]|winecfg|regedit|msiexec|regsvr32|reg|cmd|winetricks|noteapad|edit|firefox|gimp] [<args>]
 
     with:
@@ -20,6 +19,9 @@
         - <exe>: a full or partitional path with shell patterns (*?) with or without ".exe" extensions
         - <exe name>: renamed/liked winerun with the filename of any *.exe inside of a prefix  with or without ".exe" extensions
         - copy: copies the winrun script to <prefix>/<exe without path> to be started with that script by calling it directly or symolic linking it
+        - copy additonal creates <prefix>/<exe without path>.desktop file 
+        - if both wrestool (icoutils) and convert (ImageMagic) are installed copy creates an <exe>.png iconfile from the windows icon
+        - can be killed, resumed or suspended - kill can have a different signal than default 9 as argument
         - <shellscript>: a full or partitional path with shell patterns with ".sh" extensions
         - <wineversion>: either a folder defined in WINERUNNERS or a number used as pattern in the same WINERUNNERS folders
         - cd: changes dir to the same folder the <exe> is found or to <prefix>/drive_c if no <exe> is given
@@ -35,6 +37,7 @@
 
     examples:
         winerun GRunner
+        winerun GRunner kill
         winerun 4.24 grunner -fullscreen y
         winerun version 4.24 prefix WGame cd exec grunner.exe -fullscreen y -playnet 2
         winerun wine ~/WPrefixes/WGame new exec /media/user1/CD1/Setup.exe
@@ -48,10 +51,10 @@
         ./WGame/GRunner -playnet 2
     
     env vars:       (auto-assigned)
-        WINEDRIVES  (/home/wrtest/myGames)
-        WINERUNNERS (/home/wrtest/.local/share/lutris/runners/wine /home/test/.PlayOnLinux/wine)
-        WINE        (wine)
-        WINEEDITOR  (/usr/bin/xed)
+        WINEDRIVES  (/home/test/Games)
+        WINERUNNERS (/home/test/.local/share/lutris/runners/wine /home/test/.PlayOnLinux/wine)
+        WINE        ()
+        WINEEDITOR  (/usr/bin/mcedit)
 
     <prefix>/winerun.sh file:
         - will contain the last WINE=<version>
@@ -76,3 +79,4 @@
         - linked/renamed winerun will run winerun with <filename> as <exe> 
         - renamed copy of winerun in a WINEPREFIX will be used as <exe> inside of the prefix (can be created with: "winrun copy" )
         - above copy can be symbolical linked (link name can be anything)
+
