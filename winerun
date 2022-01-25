@@ -1,5 +1,5 @@
 #!/bin/sh
-Version=1.1
+Version=1.3
 maxfilesshow=25
 prgname="winerun"
 execd=`readlink -f "$0"`
@@ -8,7 +8,7 @@ prgp="$0"
 execd=${execd%/*}
 xrandr=`which xrandr`
 
-unset p p1 p2 pall d1 d2 d3 dall cmd file prefix path exe px pxold wpath isexec ignorecd isversion islink exex options
+unset p p1 p2 pall d1 d2 d3 dall dbg cmd file prefix path exe px pxold wpath isexec ignorecd isversion islink exex options exec2
 
 if [ "${0##*/}" != "$prgname" ]; then
     if [ -z "$execd" ]; then
@@ -56,7 +56,7 @@ if [ -z "$WINEEDITOR" ]; then
     WINEEDITOR=`which edit`
 fi
 if [ -z "$WINEEDITOR" ]; then
-    WINEEDITOR=`vi`
+    WINEEDITOR=`which vi`
 fi
 if [ -z "$WINERUNNERS" ]; then
     if [ -d "$HOME/.local/share/lutris/runners/wine" ]; then
@@ -80,23 +80,24 @@ help() {
 	* intuitive, small and fast
 
 	syntax:'"
-	    $prgname [dryrun|copy] [[version] <wineversion>|wine|lutris>] [prefix] <wineprefix>|<exe> [new] [cd] [[exec] <exe>|<shellscript>] [<args>]
-	    $prgname [dryrun] [[version] <wineversion>]|wine|lutris>] [prefix] <wineprefix>|<exe> [cd] [winecfg|regedit|msiexec|regsvr32|reg|cmd|winetricks|noteapad] [<args>]
+	    $prgname [gdb|dbg|dryrun|copy] [[version] <wineversion>|wine|lutris>] [prefix] <wineprefix>|<exe> [new] [cd] [[exec] <exe>|<shellscript>] [<args>]
+	    $prgname [gdb|dbg|dryrun] [[version] <wineversion>]|wine|lutris>] [prefix] <wineprefix>|<exe> [cd] [winecfg|regedit|msiexec|regsvr32|reg|cmd|winetricks|noteapad] [<args>]
 	    $prgname [dryrun] [prefix] <wineprefix>|<exe> [edit|firefox|gimp|kill|suspend|resume] <args>
-	    <exe name> [dryrun] [[version] <wineversion>|wine|lutris>] [[exec <exe>|<shellscript>]|winecfg|regedit|msiexec|regsvr32|reg|cmd|winetricks|noteapad|edit|firefox|gimp] [<args>]"'
+	    <exe name> [gdb|dbg|dryrun] [[version] <wineversion>|wine|lutris>] [[exec <exe>|<shellscript>]|winecfg|regedit|msiexec|regsvr32|reg|cmd|winetricks|noteapad|edit|firefox|gimp] [<args>]"'
 
 	with:
 	    - <wineprefix>: either a full path or defined in WINEDRIVES
 	    - <exe>: a full or partitional path with shell patterns (*?) with or without ".exe" extensions
-	    - <exe name>: renamed/liked winerun with the filename of any *.exe inside of a prefix  with or without ".exe" extensions
+	    - <exe name>: renamed/liked '"$prgname"' with the filename of any *.exe inside of a prefix  with or without ".exe" extensions
 	    - copy: copies the winrun script to <prefix>/<exe without path> to be started with that script by calling it directly or symolic linking it
-	    - copy additonal creates <prefix>/<exe without path>.desktop file 
-	    - if both wrestool (icoutils) and convert (ImageMagic) are installed copy creates an <exe>.png iconfile from the windows icon
+	    - copy additonal creates <prefix>/<exe without path>.desktop file (does not overwrite existing file) 
+	    - if both wrestool (icoutils) and convert (ImageMagic) are installed copy creates an <exe>.png iconfile from the windows icon (no overwrite)
 	    - can be killed, resumed or suspended - kill can have a different signal than default 9 as argument
 	    - <shellscript>: a full or partitional path with shell patterns with ".sh" extensions
 	    - <wineversion>: either a folder defined in WINERUNNERS or a number used as pattern in the same WINERUNNERS folders
 	    - cd: changes dir to the same folder the <exe> is found or to <prefix>/drive_c if no <exe> is given
 	    - new: creates new prefix (in the first WINEDRIVES folder if no absolute path is given)
+	    - dpg / gdb use internal or gdb as debugger
 	    - dryrun: do not execute or create anything (apart from .sh scripts in <prefix>) but print-out the actions
 	    - also "wine" or "lutris" can be used for version: it removes any saved version and default to either system wine or the lutris version defined in .yml
 	    - when "exec" is not used then "cd" is assumed
@@ -140,19 +141,19 @@ help() {
 	vars to be used with the above .sh scripts:
 	    noscreen_restore=1 (disables the auto restore screensize feature)
 	    options="<args to exe>" (will by prefixed to cmdline args)
-
+'"
 	<prefix>/<exe name without .exe>.lua file:
 	    - will call lua with the script and the wine exe call as arguments
-	    - non zero exit status will stop winerun
+	    - non zero exit status will stop $prgname
 	    - will be ignored while dryrun 
 
-	linked/renamed winrerun:
-	    - linked/renamed winerun will run winerun with <filename> as <exe> 
-	    - renamed copy of winerun in a WINEPREFIX will be used as <exe> inside of the prefix (can be created with: "winrun copy" )
+	linked/renamed $prgname:
+	    - linked/renamed $prgname will run $prgname with <filename> as <exe> 
+	    - renamed copy of $prgname in a WINEPREFIX will be used as <exe> inside of the prefix (can be created with: '$prgname copy' )
 	    - above copy can be symbolical linked (link name can be anything)
 
 
-    ' >&2
+    " >&2
 }
 
 printx() {
@@ -217,13 +218,14 @@ ico() {
     unset icode
     p1="${1%.exe}"
     p2="$2/${p1##*/}"
-    if [ -n "$convert" -a -n "$wrestool" ]; then
+    if [ -n "$convert" -a -n "$wrestool" -a ! -f "$p2.png" ]; then
 	$wrestool -x -t 14 "$1" >"$p2.ico"
 	$convert "$p2.ico" -thumbnail 64x64 -alpha on -background none -flatten "$p2.png"
 	rm "$p2.ico"
 	icode="Icon=$p2.png"
     fi
-    echo "
+    if [ ! -f "$p2.desktop" ]; then
+	echo "
 [Desktop Entry]
 Name=${p1##*/}
 Exec=$p2
@@ -232,25 +234,46 @@ StartupNotify=true
 StartupWMClass=${p1##*/}.exe
 $icode
 " >"$p2.desktop"
-    chmod a+x "$p2.desktop"
+	chmod a+x "$p2.desktop"
+    fi
 }
 
-if [ -z "$exex$islink" -a \( "$1" = "-h" -o "$1" = "--help" \) ]; then
+if [ -z "$exex$islink" -a \( "$1" = "-h" -o "$1" = "--help" \) -a -z "$2" ]; then
     help
+    exit
+elif [ -z "$exex$islink" -a \( "$1" = "-v" -o "$1" = "--version" \) -a -z "$2" ]; then
+    echo "   $prgname version: $Version"
     exit
 fi 
 
 if [ "$1" = "dryrun" ]; then
     dryrun=1
     shift
+elif [ "$1" = "gdb" ]; then
+    shift
+    dbg="dbg --gdb"
+    echo "    DEBUG: gdb" >&2
+elif [ "$1" = "dbg" ]; then
+    shift
+    dbg="dbg"
+    echo "    DEBUG: wine" >&2
 fi
-if [ "$1" = "copy" -a -z "$exex" ]; then
+if [ "$1" = "copy" ]; then
+    wrprgp="$prgp" 
     wrinstall=1
     wrestool=`which wrestool` 
     convert=`which convert`
     shift
-fi 
-
+    if [ -n "$exex" ]; then
+	unset wrinstall
+	trprgl=`readlink -f "$prgp"`
+	prgpa=`which $prgname`
+	if [ -n "$prgpa" -a -n "$trprgl" ]; then
+	    wrinstall=1
+	    wrprgp="$prgpa" 
+	fi
+    fi
+fi
 
 if [ "$1" = "version" ]; then
     unset WINE
@@ -300,11 +323,11 @@ elif [ -n "$2" ]; then
 fi
 
 WINE=${WINE:-wine}
-if [ "$1" = "exec" ]; then
+if [ -z "$exex" -a "$1" = "exec" ]; then
     isexec="i"
     ignorecd=1
     shift
-elif [ "$1 $2" = "cd exec" ]; then
+elif [ -z "$exex" -a "$1 $2" = "cd exec" ]; then
     isexec="i"
     shift
     shift
@@ -565,7 +588,9 @@ if [ "$prefix" != "$p" -a -d "$prefix" ]; then
     if [ "${WINE%/*}" != "$WINE" ]; then
 	wpath="${WINE%/*}/"
     fi
-
+    if [ -n "$dbg" ]; then
+	WINE="$WINE$dbg"
+    fi
     if [ -n "$yml" ]; then
 	echo "    Lutris:     $yml" >&2
     fi
@@ -808,10 +833,11 @@ if [ "$prefix" != "$p" -a -d "$prefix" ]; then
     elif [ \( "$1" = "exec" -a -n "$2" \) -o \( -n "$1" -a -n "$d2" -a -z "$p2" -a -z "$exe" \) -o \( -n "$exex" \) ]; then
 	if [ "$1" = "exec" ]; then
 	    shift
+	    exec2=1
 	else
 	    cmdcd=1
 	fi
-	if [ -n "$exex" ]; then
+	if [ -n "$exex" -a -z "$exec2" ]; then
 	    cmd="$exex"
 	else
 	    cmd="$1"
@@ -864,6 +890,9 @@ if [ "$prefix" != "$p" -a -d "$prefix" ]; then
 	    if [ "${cmd2##*/}" = $cmd2 ]; then
 		cmd2="./$cmd2"
 	    fi
+	    if [ -n "$wpath" ]; then
+		export PATH="${wpath%/}:$PATH"
+	    fi
 	    echo "    Script:     $cmd2" >&2
 	    run "$cmd2" $@
 	fi
@@ -893,8 +922,8 @@ if [ "$prefix" != "$p" -a -d "$prefix" ]; then
 	pex="${runexe%.exe}"
 	pex="$prefix/${pex##*/}"
 	if [ -n "$wrinstall" ]; then
-	    cp "$prgp" "$pex"
-	    echo "    Installed copy of $prgp to $pex"
+	    cp "$wrprgp" "$pex"
+	    echo "    Installed copy of $wrprgp to $pex"
 	    optadd "${pex##*/}.sh" "options" "$@"
 	    if [ -n "$@" ]; then
 		unset options
